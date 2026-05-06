@@ -34,12 +34,7 @@ class Point {
     this.supportFrames = 0;
   }
   integrate(gravity, damping) {
-    if (this.pinned) {
-      this.px = this.x;
-      this.py = this.y;
-      return;
-    }
-    if (this.resting) {
+    if (this.pinned || this.resting) {
       this.px = this.x;
       this.py = this.y;
       return;
@@ -55,18 +50,16 @@ class Point {
 
 class VerticalChain {
   constructor(text, x, topY) {
-    // reversed: chars[0] at bottom = falling tip (start of text falls first)
+    // chars[0] is the falling tip — start of text lands first
     this.chars = text.split("").reverse();
     this.points = [];
     this.restLengths = [];
-
-    ctx.font = `${config.fontSize}px ${config.fontFamily}`;
 
     const r = config.fontSize * config.collisionRadius;
 
     let y = topY;
     for (let i = 0; i < this.chars.length; i++) {
-      // seed buckling — perfectly aligned x collapses to a single column
+      // perfectly aligned x collapses to a single column — seed the buckle
       const jitter = (Math.random() - 0.5) * 0.5;
       this.points.push(new Point(x + jitter, y, r));
       if (i < this.chars.length - 1) {
@@ -84,32 +77,24 @@ class VerticalChain {
     ctx.fillStyle = config.textColor;
     ctx.textBaseline = "middle";
     ctx.textAlign = "center";
-    const pts = this.points;
-    const n = pts.length;
-    for (let i = 0; i < n; i++) {
-      const p = pts[i];
-      const angle = p.rot;
+    for (let i = 0; i < this.points.length; i++) {
+      const p = this.points[i];
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(angle);
+      ctx.rotate(p.rot);
       ctx.fillText(this.chars[i], 0, 0);
       ctx.restore();
     }
-    ctx.textAlign = "left";
   }
 }
 
+const TAU = Math.PI * 2;
 function wrapAngle(a) {
-  const tau = Math.PI * 2;
-  return ((((a + Math.PI) % tau) + tau) % tau) - Math.PI;
-}
-
-function angleDelta(from, to) {
-  return wrapAngle(to - from);
+  return ((((a + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
 }
 
 function updateRotations(chains) {
-  const ease = config.spinEase ?? 0.12;
+  const ease = config.spinEase;
   const vertical = -Math.PI / 2;
   for (const chain of chains) {
     for (const p of chain.points) {
@@ -117,10 +102,9 @@ function updateRotations(chains) {
         p.rot = vertical;
         continue;
       }
-      const target = p.spin;
-      const d = angleDelta(p.rot, target);
+      const d = wrapAngle(p.spin - p.rot);
       p.rot = wrapAngle(p.rot + d * ease);
-      if (Math.abs(d) < 1e-4) p.rot = target;
+      if (Math.abs(d) < 1e-4) p.rot = p.spin;
     }
   }
 }
@@ -128,7 +112,7 @@ function updateRotations(chains) {
 // ---- Solver ---- //
 
 function solveLinks(chains) {
-  // pull-only: links go slack under compression so the rope can fold
+  // pull-only: links slack under compression so the rope can fold
   const k = config.linkStiffness;
   for (const chain of chains) {
     const pts = chain.points;
@@ -146,8 +130,7 @@ function solveLinks(chains) {
       if (dist <= rest) continue;
       const wA = aFixed ? 0 : 1;
       const wB = bFixed ? 0 : 1;
-      const wSum = wA + wB;
-      const diff = (((dist - rest) / dist) * k) / wSum;
+      const diff = (((dist - rest) / dist) * k) / (wA + wB);
       a.x += dx * diff * wA;
       a.y += dy * diff * wA;
       b.x -= dx * diff * wB;
@@ -230,11 +213,11 @@ function solveFloor(chains, floorY) {
   }
 }
 
-function solveRestingContact(chains) {
+let allPoints = [];
+function solveRestingContact() {
   const dotMin = config.restingSupportDot;
   const need = config.restingFrames;
-  const all = [];
-  for (const c of chains) for (const p of c.points) all.push(p);
+  const all = allPoints;
 
   for (const p of all) {
     if (p.pinned || p.resting) continue;
@@ -273,12 +256,8 @@ function solveRestingContact(chains) {
 }
 
 function settleLanded(chains) {
-  // pin any point whose net displacement stays below `settleSlack` for
-  // `settleFrames` consecutive frames. works for floor-resters and for
-  // letters piled on top of others — anything that has stopped traveling.
   const frames = config.settleFrames;
-  const slack = config.settleSlack;
-  const slack2 = slack * slack;
+  const slack2 = config.settleSlack * config.settleSlack;
   for (const chain of chains) {
     for (const p of chain.points) {
       if (p.pinned) continue;
@@ -296,7 +275,7 @@ function settleLanded(chains) {
           p.py = p.y;
         }
       } else {
-        // moved too far — resnapshot from here and start a fresh window
+        // resnapshot and start a fresh window
         p.restFrames = 1;
         p.refX = p.x;
         p.refY = p.y;
@@ -305,8 +284,8 @@ function settleLanded(chains) {
   }
 }
 
-function applyBuckleJitter(chains, floorY) {
-  // only nudges still-falling letters whose neighbour below has jammed
+function applyBuckleJitter(chains) {
+  // nudges still-falling letters whose neighbour below has jammed
   const j = config.buckleJitter;
   if (j <= 0) return;
   for (const chain of chains) {
@@ -327,10 +306,10 @@ function applyBuckleJitter(chains, floorY) {
 // ---- Scene ---- //
 
 let chains = [];
+let settled = false;
 
 function init() {
-  const W = canvas.width;
-  const x = W * config.chainX;
+  const x = canvas.width * config.chainX;
   const text = textSource.replace(/\n/g, " ").trim();
 
   ctx.font = `${config.fontSize}px ${config.fontFamily}`;
@@ -340,6 +319,8 @@ function init() {
   const topY = -(totalHeight + config.fontSize * 2);
 
   chains = [new VerticalChain(text, x, topY)];
+  allPoints = chains.flatMap((c) => c.points);
+  settled = false;
 }
 
 init();
@@ -363,28 +344,26 @@ function loop() {
   const H = canvas.height;
   const floor = H * config.floorY;
 
-  if (!frozen) {
-    for (const chain of chains)
-      for (const p of chain.points) p.integrate(config.gravity, config.damping);
+  if (!frozen && !settled) {
+    for (const p of allPoints) p.integrate(config.gravity, config.damping);
 
-    applyBuckleJitter(chains, floor);
+    applyBuckleJitter(chains);
 
-    const iters = config.constraintIterations;
-    for (let i = 0; i < iters; i++) {
+    for (let i = 0; i < config.constraintIterations; i++) {
       solveLinks(chains);
       solveCollisions(chains);
       solveFloor(chains, floor);
     }
 
-    solveRestingContact(chains);
+    solveRestingContact();
     settleLanded(chains);
-
     updateRotations(chains);
+
+    settled = allPoints.every((p) => p.pinned);
   }
 
   ctx.fillStyle = config.backgroundColor;
   ctx.fillRect(0, 0, W, H);
-
   ctx.fillStyle = config.floorColor;
   ctx.fillRect(0, floor, W, H - floor);
 

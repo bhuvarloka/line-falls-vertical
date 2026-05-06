@@ -1,43 +1,43 @@
 export const config = {
-  fontSize: 28,
+  // ---- Type ---- //
+  fontSize: 48,
   fontFamily: 'Georgia, "Times New Roman", serif',
   textColor: "#000000",
 
-  // physics
-  gravity: 0.1,
-  damping: 0.995,
-  constraintIterations: 12,
+  // ---- Physics ---- //
+  gravity: 0.1, // ↓ floaty · ↑ heavy
+  damping: 0.995, // ↓ draggy · ↑ bouncy (1 = none)
+  constraintIterations: 12, // ↓ wobbly · ↑ stiff
 
-  // rope: links act like inextensible string (pull only, no push)
-  linkStiffness: 1.0,
-  linkSlack: 0.0,
+  // ---- Rope (pull-only links) ---- //
+  linkStiffness: 1.0, // ↓ stretchy · ↑ rigid
+  linkSlack: 0.0, // ↓ taut · ↑ loose
 
-  // letter-letter collision (sphere radius as fraction of fontSize)
-  collisionRadius: 0.3,
-  collisionStiffness: 0.8,
+  // ---- Letter collisions ---- //
+  collisionRadius: 0.3, // hit radius ÷ fontSize · ↓ overlap · ↑ loose pile
+  collisionStiffness: 0.5, // ↓ squishy · ↑ hard
 
-  // small lateral jitter applied during fall so the rope buckles
-  // instead of falling perfectly straight onto a single point
-  buckleJitter: 0.6,
+  buckleJitter: 0.75, // ↓ straight column · ↑ chaotic pile
 
-  // random rotation range (radians) locked at floor contact. π = ±90°
-  impactSpin: Math.PI,
+  // ---- Spin on impact ---- //
+  impactSpin: Math.PI, // rotation range on landing · 0 = upright · π = ±90°
+  spinEase: 0.12, // ↓ slow rotate · ↑ snap
 
-  // how fast letters ease toward their locked rotation (0..1)
-  spinEase: 0.12,
+  // ---- Settle (pinning) ---- //
+  settleFrames: 30, // frames still before pin · ↓ snappy · ↑ patient
+  settleSlack: 2.0, // px drift allowed · ↓ strict · ↑ lenient
 
-  // pin a letter once it has drifted less than `settleSlack` px over `settleFrames` frames
-  settleFrames: 30,
-  settleSlack: 2.0,
+  // ---- Resting (sleeping) ---- //
+  restingFrames: 8, // frames supported before sleep
+  restingSupportDot: 0.6, // ↓ sides count · ↑ only directly under
+  restingWakeVelocity: 1.5, // ↓ wakes easily · ↑ ignores nudges
 
-  restingFrames: 8,
-  restingSupportDot: 0.6,
-  restingWakeVelocity: 1.5,
+  // ---- Layout ---- //
+  chainX: 0.5, // 0 = left · 0.5 = center · 1 = right
+  floorY: 0.95, // 0 = top · 1 = bottom
+  floorFriction: 0.6, // ↓ slidey · ↑ grippy
 
-  chainX: 0.5,
-  floorY: 0.95,
-  floorFriction: 0.6,
-
+  // ---- Colors ---- //
   backgroundColor: "#ffffff",
   floorColor: "#E8392A",
 };
