@@ -1,7 +1,7 @@
 export const config = {
   // ---- Type ---- //
-  fontSize: 48,
-  fontFamily: 'Georgia, "Times New Roman", serif',
+  fontSize: 36,
+  fontFamily: '"Playfair Display", Georgia, serif',
   textColor: "#000000",
 
   // ---- Physics ---- //

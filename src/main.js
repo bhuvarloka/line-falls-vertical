@@ -324,6 +324,8 @@ function init() {
 }
 
 init();
+// remeasure once webfont swaps in — fallback metrics differ from Playfair
+if (document.fonts) document.fonts.ready.then(init);
 
 let frozen = true;
 window.addEventListener("keydown", (e) => {
