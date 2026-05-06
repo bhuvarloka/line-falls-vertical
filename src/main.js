@@ -1,6 +1,11 @@
 import { config } from "./config.js";
 import textSource from "./text.txt?raw";
 
+const phrases = textSource
+  .split("\n")
+  .map((l) => l.trim())
+  .filter(Boolean);
+
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
 document.getElementById("canvas-container").appendChild(canvas);
@@ -307,27 +312,75 @@ function applyBuckleJitter(chains) {
 
 let chains = [];
 let settled = false;
+let phraseQueue = [];
+let phraseIndex = 0;
+let nextPhraseTimer = null;
 
-function init() {
-  const x = canvas.width * config.chainX;
-  const text = textSource.replace(/\n/g, " ").trim();
+function rebuildAllPoints() {
+  // only simulate the active chain + the one just before it (for landing support)
+  const live = chains.slice(-2);
+  allPoints = live.flatMap((c) => c.points);
+}
 
+function dropNextPhrase() {
+  if (phraseIndex >= phraseQueue.length) return;
+
+  const text = phraseQueue[phraseIndex++];
   ctx.font = `${config.fontSize}px ${config.fontFamily}`;
   const totalHeight = text
     .split("")
     .reduce((s, c) => s + ctx.measureText(c).width, 0);
   const topY = -(totalHeight + config.fontSize * 2);
 
-  chains = [new VerticalChain(text, x, topY)];
-  allPoints = chains.flatMap((c) => c.points);
+  // slight random x offset so phrases don't stack in one column
+  const spread = canvas.width * 0.08;
+  const x = canvas.width * config.chainX + (Math.random() - 0.5) * spread;
+
+  const chain = new VerticalChain(text, x, topY);
+  chains.push(chain);
+  rebuildAllPoints();
   settled = false;
+}
+
+function scheduleNext() {
+  if (phraseIndex >= phraseQueue.length) return;
+  const delay = 4000 + Math.random() * 8000; // 4–12 s
+  nextPhraseTimer = setTimeout(() => {
+    // wait until the active chain is fully pinned before dropping the next
+    const active = chains[chains.length - 1];
+    const ready = !active || active.points.every((p) => p.pinned);
+    if (ready) {
+      dropNextPhrase();
+      scheduleNext();
+    } else {
+      // poll until pinned, then schedule the next interval
+      const poll = setInterval(() => {
+        if (active.points.every((p) => p.pinned)) {
+          clearInterval(poll);
+          dropNextPhrase();
+          scheduleNext();
+        }
+      }, 200);
+    }
+  }, delay);
+}
+
+function init() {
+  clearTimeout(nextPhraseTimer);
+  chains = [];
+  allPoints = [];
+  settled = false;
+  phraseIndex = 0;
+  phraseQueue = [...phrases];
+  dropNextPhrase();
+  scheduleNext();
 }
 
 init();
 // remeasure once webfont swaps in — fallback metrics differ from Playfair
 if (document.fonts) document.fonts.ready.then(init);
 
-let frozen = true;
+let frozen = false;
 window.addEventListener("keydown", (e) => {
   if (e.code === "Space") {
     e.preventDefault();
@@ -347,21 +400,25 @@ function loop() {
   const floor = H * config.floorY;
 
   if (!frozen && !settled) {
+    // only the active chain (last) needs integration and constraint solving
+    const activeChains = chains.slice(-1);
+
     for (const p of allPoints) p.integrate(config.gravity, config.damping);
 
-    applyBuckleJitter(chains);
+    applyBuckleJitter(activeChains);
 
     for (let i = 0; i < config.constraintIterations; i++) {
-      solveLinks(chains);
-      solveCollisions(chains);
-      solveFloor(chains, floor);
+      solveLinks(activeChains);
+      solveCollisions(activeChains);
+      solveFloor(activeChains, floor);
     }
 
     solveRestingContact();
-    settleLanded(chains);
-    updateRotations(chains);
+    settleLanded(activeChains);
+    updateRotations(activeChains);
 
-    settled = allPoints.every((p) => p.pinned);
+    settled =
+      phraseIndex >= phraseQueue.length && allPoints.every((p) => p.pinned);
   }
 
   ctx.fillStyle = config.backgroundColor;
