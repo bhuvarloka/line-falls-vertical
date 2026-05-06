@@ -23,9 +23,16 @@ export const config = {
   // random rotation range (radians) locked at floor contact. π = ±90°
   impactSpin: Math.PI,
 
+  // how fast letters ease toward their locked rotation (0..1)
+  spinEase: 0.12,
+
   // pin a letter once it has drifted less than `settleSlack` px over `settleFrames` frames
   settleFrames: 30,
   settleSlack: 2.0,
+
+  restingFrames: 8,
+  restingSupportDot: 0.6,
+  restingWakeVelocity: 1.5,
 
   chainX: 0.5,
   floorY: 0.95,
