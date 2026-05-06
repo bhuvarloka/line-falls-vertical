@@ -5,190 +5,203 @@ const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
 document.getElementById("canvas-container").appendChild(canvas);
 
-// ---- Sizing ---- //
-
 function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 }
 resize();
-window.addEventListener("resize", () => {
-  resize();
-  init();
-});
+window.addEventListener("resize", () => { resize(); init(); });
 
 // ---- Physics ---- //
 
 class Point {
-  constructor(x, y) {
-    this.x = x;
-    this.y = y;
-    this.px = x;
-    this.py = y;
+  constructor(x, y, radius) {
+    this.x = x; this.y = y;
+    this.px = x; this.py = y;
+    this.r = radius;
+    this.onFloor = false;
+    this.wasOnFloor = false;
+    this.pinned = false;
+    this.restFrames = 0;
+    this.spin = 0;
   }
-
   integrate(gravity, damping) {
+    if (this.pinned) { this.px = this.x; this.py = this.y; return; }
     const vx = (this.x - this.px) * damping;
     const vy = (this.y - this.py) * damping;
-    this.px = this.x;
-    this.py = this.y;
+    this.px = this.x; this.py = this.y;
     this.x += vx;
     this.y += vy + gravity;
   }
 }
 
-class Chain {
-  constructor(text, startX, startY, totalWidth) {
-    this.text = text;
+class VerticalChain {
+  constructor(text, x, topY) {
+    // reversed: chars[0] at bottom = falling tip (start of text falls first)
+    this.chars = text.split("").reverse();
     this.points = [];
+    this.restLengths = [];
 
-    const len = config.linkRestLength;
-    const count = Math.ceil(totalWidth / len) + 1;
-    for (let i = 0; i < count; i++) {
-      this.points.push(new Point(startX + i * len, startY));
+    ctx.font = `${config.fontSize}px ${config.fontFamily}`;
+
+    const r = config.fontSize * config.collisionRadius;
+
+    let y = topY;
+    for (let i = 0; i < this.chars.length; i++) {
+      // seed buckling — perfectly aligned x collapses to a single column
+      const jitter = (Math.random() - 0.5) * 0.5;
+      this.points.push(new Point(x + jitter, y, r));
+      if (i < this.chars.length - 1) {
+        const wA = ctx.measureText(this.chars[i]).width;
+        const wB = ctx.measureText(this.chars[i + 1]).width;
+        const rest = (wA + wB) * 0.5;
+        this.restLengths.push(rest);
+        y += rest;
+      }
     }
   }
 
   draw(ctx) {
-    const pts = this.points;
-    if (pts.length < 2) return;
-
     ctx.font = `${config.fontSize}px ${config.fontFamily}`;
     ctx.fillStyle = config.textColor;
-    // ctx.textBaseline = 'alphabetic';
     ctx.textBaseline = "middle";
-
-    const chars = this.text.split("");
-    const charWidths = chars.map((c) => ctx.measureText(c).width);
-    const textTotalWidth = charWidths.reduce((s, w) => s + w, 0);
-
-    const segLengths = [];
-    let totalArc = 0;
-    for (let i = 0; i < pts.length - 1; i++) {
-      const dx = pts[i + 1].x - pts[i].x;
-      const dy = pts[i + 1].y - pts[i].y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      segLengths.push(d);
-      totalArc += d;
-    }
-
-    const spaceCount = chars.filter((c) => c === " ").length;
-    const extraPerSpace = spaceCount > 0 ? (totalArc - textTotalWidth) / spaceCount : 0;
-
-    let cursor = 0;
-
-    for (let ci = 0; ci < chars.length; ci++) {
-      const cw = charWidths[ci] + (chars[ci] === " " ? extraPerSpace : 0);
-      const pos = cursor + cw * 0.5;
-      cursor += cw;
-
-      if (pos < 0 || pos > totalArc) continue;
-
-      let arc = 0,
-        seg = 0;
-      while (seg < segLengths.length - 1 && arc + segLengths[seg] < pos) {
-        arc += segLengths[seg++];
-      }
-
-      const t = segLengths[seg] > 0 ? (pos - arc) / segLengths[seg] : 0;
-      const a = pts[seg];
-      const b = pts[Math.min(seg + 1, pts.length - 1)];
-      const gx = a.x + (b.x - a.x) * t;
-      const gy = a.y + (b.y - a.y) * t;
-      const angle = Math.atan2(b.y - a.y, b.x - a.x);
-
+    ctx.textAlign = "center";
+    const pts = this.points;
+    const n = pts.length;
+    for (let i = 0; i < n; i++) {
+      const p = pts[i];
+      // airborne: vertical (rope hangs straight). landed: locked random angle.
+      const angle = p.wasOnFloor ? p.spin : -Math.PI / 2;
       ctx.save();
-      ctx.translate(gx, gy);
+      ctx.translate(p.x, p.y);
       ctx.rotate(angle);
-      ctx.fillText(chars[ci], -cw * 0.5, 0);
+      ctx.fillText(this.chars[i], 0, 0);
       ctx.restore();
+    }
+    ctx.textAlign = "left";
+  }
+}
+
+// ---- Solver ---- //
+
+function solveLinks(chains) {
+  // pull-only: links go slack under compression so the rope can fold
+  const k = config.linkStiffness;
+  for (const chain of chains) {
+    const pts = chain.points;
+    const rests = chain.restLengths;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      if (a.pinned && b.pinned) continue;
+      const rest = rests[i] * (1 + config.linkSlack);
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+      if (dist <= rest) continue;
+      const wA = a.pinned ? 0 : 1;
+      const wB = b.pinned ? 0 : 1;
+      const wSum = wA + wB;
+      const diff = ((dist - rest) / dist) * k / wSum;
+      a.x += dx * diff * wA; a.y += dy * diff * wA;
+      b.x -= dx * diff * wB; b.y -= dy * diff * wB;
     }
   }
 }
 
-// ---- Unified solver ---- //
-
-// All constraints run together each iteration so they can't fight each other.
-function solve(chains, circleX, circleY, circleR, floorY) {
-  const linkLen = config.linkRestLength;
-  const minDist = config.pointRadius * 2;
-  const minDist2 = minDist * minDist;
-  const W = canvas.width;
-  const iters = config.constraintIterations;
-
-  for (let iter = 0; iter < iters; iter++) {
-    // intra-chain link constraints
-    for (const chain of chains) {
-      const pts = chain.points;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const a = pts[i];
-        const b = pts[i + 1];
+function solveCollisions(chains) {
+  const k = config.collisionStiffness;
+  for (const chain of chains) {
+    const pts = chain.points;
+    const n = pts.length;
+    for (let i = 0; i < n; i++) {
+      const a = pts[i];
+      for (let j = i + 2; j < n; j++) {
+        const b = pts[j];
+        if (a.pinned && b.pinned) continue;
+        const minD = a.r + b.r;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
-        const diff = ((dist - linkLen) / dist) * 0.5;
-        a.x += dx * diff;
-        a.y += dy * diff;
-        b.x -= dx * diff;
-        b.y -= dy * diff;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= minD * minD || d2 === 0) continue;
+        const d = Math.sqrt(d2);
+        const wA = a.pinned ? 0 : 1;
+        const wB = b.pinned ? 0 : 1;
+        const overlap = (minD - d) / d * k / (wA + wB);
+        const ox = dx * overlap;
+        const oy = dy * overlap;
+        a.x -= ox * wA; a.y -= oy * wA;
+        b.x += ox * wB; b.y += oy * wB;
       }
     }
+  }
+}
 
-    // point separation — both within each chain (self-collision) and between chains
-    // skip immediate neighbors (j <= i+1) since the link constraint already handles those
-    for (let ci = 0; ci < chains.length; ci++) {
-      const pa = chains[ci].points;
-      for (let cj = ci; cj < chains.length; cj++) {
-        const pb = chains[cj].points;
-        for (let i = 0; i < pa.length; i++) {
-          const jMin = ci === cj ? i + 2 : 0; // skip self and immediate neighbor
-          for (let j = jMin; j < pb.length; j++) {
-            const a = pa[i];
-            const b = pb[j];
-            const dx = b.x - a.x;
-            const dy = b.y - a.y;
-            const d2 = dx * dx + dy * dy;
-            if (d2 < minDist2 && d2 > 0) {
-              const d = Math.sqrt(d2);
-              const push = ((minDist - d) / d) * 0.15;
-              a.x -= dx * push;
-              a.y -= dy * push;
-              b.x += dx * push;
-              b.y += dy * push;
-            }
-          }
+function solveFloor(chains, floorY) {
+  const friction = config.floorFriction;
+  for (const chain of chains) {
+    for (const p of chain.points) {
+      if (p.pinned) continue;
+      const limit = floorY - p.r;
+      if (p.y > limit) {
+        p.y = limit;
+        p.px = p.x - (p.x - p.px) * (1 - friction);
+        p.py = p.y;
+        p.onFloor = true;
+        if (!p.wasOnFloor) {
+          p.spin = -Math.PI / 2 + (Math.random() - 0.5) * config.impactSpin;
+          p.wasOnFloor = true;
         }
+      } else {
+        p.onFloor = false;
       }
     }
+  }
+}
 
-    // boundary constraints — last so they're never overridden
-    for (const chain of chains)
-      for (const p of chain.points) {
-        const halfGlyph = config.fontSize * 0.3;
-        const dx = p.x - circleX;
-        const dy = p.y - circleY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < circleR + halfGlyph && dist > 0) {
-          const push = circleR + halfGlyph;
-          p.x = circleX + (dx / dist) * push;
-          p.y = circleY + (dy / dist) * push;
-          p.px = p.x - (p.x - p.px) * config.circleFriction;
-          p.py = p.y - (p.y - p.py) * config.circleFriction;
+function settleLanded(chains) {
+  // pin any point whose net displacement stays below `settleSlack` for
+  // `settleFrames` consecutive frames. works for floor-resters and for
+  // letters piled on top of others — anything that has stopped traveling.
+  const frames = config.settleFrames;
+  const slack = config.settleSlack;
+  const slack2 = slack * slack;
+  for (const chain of chains) {
+    for (const p of chain.points) {
+      if (p.pinned) continue;
+      if (p.restFrames === 0) { p.refX = p.x; p.refY = p.y; }
+      const dx = p.x - p.refX;
+      const dy = p.y - p.refY;
+      if (dx * dx + dy * dy < slack2) {
+        p.restFrames++;
+        if (p.restFrames >= frames) {
+          p.pinned = true;
+          p.px = p.x;
+          p.py = p.y;
         }
-
-        if (p.y > floorY - halfGlyph) {
-          p.y = floorY - halfGlyph;
-          p.py = floorY - halfGlyph;
-        }
-        if (p.x < 0) {
-          p.x = 0;
-          p.px = 0;
-        }
-        if (p.x > W) {
-          p.x = W;
-          p.px = W;
-        }
+      } else {
+        // moved too far — resnapshot from here and start a fresh window
+        p.restFrames = 1;
+        p.refX = p.x;
+        p.refY = p.y;
       }
+    }
+  }
+}
+
+function applyBuckleJitter(chains, floorY) {
+  // only nudges still-falling letters whose neighbour below has jammed
+  const j = config.buckleJitter;
+  if (j <= 0) return;
+  for (const chain of chains) {
+    const pts = chain.points;
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i];
+      if (p.wasOnFloor) continue;
+      const below = pts[i - 1];
+      if (Math.abs(p.y - below.y) < p.r * 1.8) {
+        p.x += (Math.random() - 0.5) * j;
+      }
+    }
   }
 }
 
@@ -196,84 +209,24 @@ function solve(chains, circleX, circleY, circleR, floorY) {
 
 let chains = [];
 
-function wrapText(text, maxWidth) {
-  const words = text.split(/\s+/).filter(Boolean);
-  const n = words.length;
-  if (n === 0) return [];
-
-  // precompute cumulative widths for O(1) line-width queries
-  const wordW = words.map((w) => ctx.measureText(w).width);
-  const spaceW = ctx.measureText(" ").width;
-
-  // dp[i] = min cost to place words[0..i-1]; breaks[i] = start word of last line ending at i
-  const INF = Infinity;
-  const cost = new Array(n + 1).fill(INF);
-  const breaks = new Array(n + 1).fill(0);
-  cost[0] = 0;
-
-  for (let i = 1; i <= n; i++) {
-    let lineW = 0;
-    for (let j = i; j >= 1; j--) {
-      lineW += wordW[j - 1];
-      if (j < i) lineW += spaceW;
-      if (lineW > maxWidth && j < i) break; // too wide, no point going further back
-      const isLast = i === n;
-      const slack = maxWidth - lineW;
-      const ratio = slack / maxWidth; // 0 = full, 1 = empty
-      // cube penalty: lines below ~85% fill cost disproportionately more,
-      // forcing the breaker to reflow neighbours rather than leave sparse lines
-      const lineCost = isLast ? 0 : Math.pow(ratio, 3) * 1e7;
-      const total = cost[j - 1] + lineCost;
-      if (total < cost[i]) {
-        cost[i] = total;
-        breaks[i] = j - 1; // words[j-1..i-1] go on this line
-      }
-    }
-  }
-
-  // reconstruct lines
-  const result = [];
-  let end = n;
-  while (end > 0) {
-    const start = breaks[end];
-    result.unshift(words.slice(start, end).join(" "));
-    end = start;
-  }
-  return result;
-}
-
 function init() {
   const W = canvas.width;
-  const H = canvas.height;
-  const maxW = W * (1 - config.textMarginX * 2);
+  const x = W * config.chainX;
+  const text = textSource.replace(/\n/g, " ").trim();
 
   ctx.font = `${config.fontSize}px ${config.fontFamily}`;
+  const totalHeight = text.split("").reduce((s, c) => s + ctx.measureText(c).width, 0);
+  const topY = -(totalHeight + config.fontSize * 2);
 
-  const words = textSource.replace(/\n/g, " ");
-  const lines = wrapText(words, maxW);
-
-  const marginX = W * config.textMarginX;
-  chains = lines.map((text, i) => {
-    const textW = ctx.measureText(text).width;
-    const isLast = i === lines.length - 1;
-    const chainW = isLast ? textW : maxW;
-    const y = H * config.textStartY + i * H * config.lineSpacingY;
-    return new Chain(text, marginX, y, chainW);
-  });
+  chains = [new VerticalChain(text, x, topY)];
 }
 
 init();
 
 let frozen = true;
 window.addEventListener("keydown", (e) => {
-  if (e.code === "Space") {
-    e.preventDefault();
-    frozen = !frozen;
-  }
-  if (e.code === "KeyR") {
-    frozen = true;
-    init();
-  }
+  if (e.code === "Space") { e.preventDefault(); frozen = !frozen; }
+  if (e.code === "KeyR") { frozen = true; init(); }
 });
 
 // ---- Loop ---- //
@@ -281,29 +234,29 @@ window.addEventListener("keydown", (e) => {
 function loop() {
   const W = canvas.width;
   const H = canvas.height;
-  const cx = W * config.circleX;
-  const cy = H * config.circleY;
-  const cr = config.circleDiameter * 0.5;
   const floor = H * config.floorY;
 
   if (!frozen) {
-    for (const chain of chains) {
+    for (const chain of chains)
       for (const p of chain.points) p.integrate(config.gravity, config.damping);
-    }
-  }
 
-  solve(chains, cx, cy, cr, floor);
+    applyBuckleJitter(chains, floor);
+
+    const iters = config.constraintIterations;
+    for (let i = 0; i < iters; i++) {
+      solveLinks(chains);
+      solveCollisions(chains);
+      solveFloor(chains, floor);
+    }
+
+    settleLanded(chains);
+  }
 
   ctx.fillStyle = config.backgroundColor;
   ctx.fillRect(0, 0, W, H);
 
   ctx.fillStyle = config.floorColor;
   ctx.fillRect(0, floor, W, H - floor);
-
-  ctx.beginPath();
-  ctx.arc(cx, cy, cr, 0, Math.PI * 2);
-  ctx.fillStyle = config.circleColor;
-  ctx.fill();
 
   for (const chain of chains) chain.draw(ctx);
 
