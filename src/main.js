@@ -10,9 +10,18 @@ const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
 document.getElementById("canvas-container").appendChild(canvas);
 
+// Baked (static) layer: once a phrase is no longer the active chain,
+// its letters never animate again — we can draw it once and then blit.
+const bakedCanvas = document.createElement("canvas");
+const bakedCtx = bakedCanvas.getContext("2d");
+let bakedChainCount = 0;
+
 function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
+
+  bakedCanvas.width = canvas.width;
+  bakedCanvas.height = canvas.height;
 }
 resize();
 window.addEventListener("resize", () => {
@@ -316,6 +325,27 @@ let phraseQueue = [];
 let phraseIndex = 0;
 let nextPhraseTimer = null;
 
+function resetBakedLayer() {
+  bakedChainCount = 0;
+  bakedCtx.clearRect(0, 0, bakedCanvas.width, bakedCanvas.height);
+}
+
+function chainIsSimStatic(chain) {
+  // Only bake chains that won't move in future simulation steps.
+  return chain.points.every((p) => p.pinned || p.resting);
+}
+
+function bakeInactiveChains() {
+  // Never bake the active (last) chain: its rotations can still ease while active.
+  const bakeLimit = Math.max(0, chains.length - 1);
+  while (bakedChainCount < bakeLimit) {
+    const chain = chains[bakedChainCount];
+    if (!chainIsSimStatic(chain)) break;
+    chain.draw(bakedCtx);
+    bakedChainCount++;
+  }
+}
+
 function rebuildAllPoints() {
   // only simulate the active chain + the one just before it (for landing support)
   const live = chains.slice(-2);
@@ -372,6 +402,9 @@ function init() {
   settled = false;
   phraseIndex = 0;
   phraseQueue = [...phrases];
+
+  resetBakedLayer();
+
   dropNextPhrase();
   scheduleNext();
 }
@@ -426,7 +459,9 @@ function loop() {
   ctx.fillStyle = config.floorColor;
   ctx.fillRect(0, floor, W, H - floor);
 
-  for (const chain of chains) chain.draw(ctx);
+  bakeInactiveChains();
+  ctx.drawImage(bakedCanvas, 0, 0);
+  for (let i = bakedChainCount; i < chains.length; i++) chains[i].draw(ctx);
 
   requestAnimationFrame(loop);
 }
