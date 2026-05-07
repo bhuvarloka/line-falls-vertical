@@ -363,7 +363,7 @@ function dropNextPhrase() {
   const topY = -(totalHeight + config.fontSize * 2);
 
   // slight random x offset so phrases don't stack in one column
-  const spread = canvas.width * 0.08;
+  const spread = canvas.width * config.chainXSpread;
   const x = canvas.width * config.chainX + (Math.random() - 0.5) * spread;
 
   const chain = new VerticalChain(text, x, topY);
