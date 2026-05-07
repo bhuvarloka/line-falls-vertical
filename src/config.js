@@ -28,13 +28,13 @@ export const config = {
   settleSlack: 2.0, // px drift allowed · ↓ strict · ↑ lenient
 
   // ---- Resting (sleeping) ---- //
-  restingFrames: 12, // frames supported before sleep
+  restingFrames: 9, // frames supported before sleep
   restingSupportDot: 0.6, // ↓ sides count · ↑ only directly under
   restingWakeVelocity: 1.5, // ↓ wakes easily · ↑ ignores nudges
 
   // ---- Layout ---- //
   chainX: 0.5, // 0 = left · 0.5 = center · 1 = right
-  chainXSpread: 0.2, // random x offset range as fraction of canvas width
+  chainXSpread: 0.18, // random x offset range as fraction of canvas width
   floorY: 0.95, // 0 = top · 1 = bottom
   floorFriction: 0.02, // ↓ slidey · ↑ grippy
 
