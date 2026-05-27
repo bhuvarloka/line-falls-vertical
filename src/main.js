@@ -153,54 +153,89 @@ function solveLinks(chains) {
   }
 }
 
+function resolvePair(a, b, k, wakeV) {
+  let aFixed = a.pinned || a.resting;
+  let bFixed = b.pinned || b.resting;
+  if (aFixed && bFixed) return;
+  const minD = a.r + b.r;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const d2 = dx * dx + dy * dy;
+  if (d2 >= minD * minD || d2 === 0) return;
+
+  if (a.resting && !b.pinned) {
+    const v = Math.abs(b.y - b.py) + Math.abs(b.x - b.px);
+    if (v > wakeV) {
+      a.resting = false;
+      a.supportFrames = 0;
+      aFixed = a.pinned;
+    }
+  }
+  if (b.resting && !a.pinned) {
+    const v = Math.abs(a.y - a.py) + Math.abs(a.x - a.px);
+    if (v > wakeV) {
+      b.resting = false;
+      b.supportFrames = 0;
+      bFixed = b.pinned;
+    }
+  }
+  if (aFixed && bFixed) return;
+
+  const d = Math.sqrt(d2);
+  const wA = aFixed ? 0 : 1;
+  const wB = bFixed ? 0 : 1;
+  const overlap = (((minD - d) / d) * k) / (wA + wB);
+  const ox = dx * overlap;
+  const oy = dy * overlap;
+  a.x -= ox * wA;
+  a.y -= oy * wA;
+  b.x += ox * wB;
+  b.y += oy * wB;
+}
+
 function solveCollisions(chains) {
   const k = config.collisionStiffness;
   const wakeV = config.restingWakeVelocity;
+  // self-collisions within each active chain (skip adjacent links)
   for (const chain of chains) {
     const pts = chain.points;
     const n = pts.length;
     for (let i = 0; i < n; i++) {
-      const a = pts[i];
       for (let j = i + 2; j < n; j++) {
-        const b = pts[j];
-        let aFixed = a.pinned || a.resting;
-        let bFixed = b.pinned || b.resting;
-        if (aFixed && bFixed) continue;
-        const minD = a.r + b.r;
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 >= minD * minD || d2 === 0) continue;
-
-        if (a.resting && !b.pinned) {
-          const v = Math.abs(b.y - b.py) + Math.abs(b.x - b.px);
-          if (v > wakeV) {
-            a.resting = false;
-            a.supportFrames = 0;
-            aFixed = a.pinned;
-          }
-        }
-        if (b.resting && !a.pinned) {
-          const v = Math.abs(a.y - a.py) + Math.abs(a.x - a.px);
-          if (v > wakeV) {
-            b.resting = false;
-            b.supportFrames = 0;
-            bFixed = b.pinned;
-          }
-        }
-        if (aFixed && bFixed) continue;
-
-        const d = Math.sqrt(d2);
-        const wA = aFixed ? 0 : 1;
-        const wB = bFixed ? 0 : 1;
-        const overlap = (((minD - d) / d) * k) / (wA + wB);
-        const ox = dx * overlap;
-        const oy = dy * overlap;
-        a.x -= ox * wA;
-        a.y -= oy * wA;
-        b.x += ox * wB;
-        b.y += oy * wB;
+        resolvePair(pts[i], pts[j], k, wakeV);
       }
+    }
+    // collide active letters against the settled pile (static obstacles)
+    for (let i = 0; i < n; i++) {
+      const a = pts[i];
+      if (a.pinned || a.resting) continue;
+      collidePile(a, k, wakeV);
+    }
+  }
+}
+
+// Spatial hash of settled letters so a falling letter only tests nearby cells.
+let pileGrid = new Map();
+const PILE_CELL = config.fontSize; // ~one letter per cell
+function pileKey(cx, cy) {
+  return cx + "," + cy;
+}
+function addToPile(p) {
+  const cx = Math.floor(p.x / PILE_CELL);
+  const cy = Math.floor(p.y / PILE_CELL);
+  const key = pileKey(cx, cy);
+  let bucket = pileGrid.get(key);
+  if (!bucket) pileGrid.set(key, (bucket = []));
+  bucket.push(p);
+}
+function collidePile(a, k, wakeV) {
+  const cx = Math.floor(a.x / PILE_CELL);
+  const cy = Math.floor(a.y / PILE_CELL);
+  for (let gx = cx - 1; gx <= cx + 1; gx++) {
+    for (let gy = cy - 1; gy <= cy + 1; gy++) {
+      const bucket = pileGrid.get(pileKey(gx, gy));
+      if (!bucket) continue;
+      for (const b of bucket) resolvePair(a, b, k, wakeV);
     }
   }
 }
@@ -328,6 +363,7 @@ let nextPhraseTimer = null;
 function resetBakedLayer() {
   bakedChainCount = 0;
   bakedCtx.clearRect(0, 0, bakedCanvas.width, bakedCanvas.height);
+  pileGrid = new Map();
 }
 
 function chainIsSimStatic(chain) {
@@ -342,6 +378,7 @@ function bakeInactiveChains() {
     const chain = chains[bakedChainCount];
     if (!chainIsSimStatic(chain)) break;
     chain.draw(bakedCtx);
+    for (const p of chain.points) addToPile(p); // becomes a static obstacle
     bakedChainCount++;
   }
 }

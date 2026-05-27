@@ -15,9 +15,9 @@ export const config = {
 
   // ---- Letter collisions ---- //
   collisionRadius: 0.3, // hit radius ÷ fontSize · ↓ overlap · ↑ loose pile
-  collisionStiffness: 0.15, // ↓ squishy · ↑ hard
+  collisionStiffness: 0.1, // ↓ squishy · ↑ hard
 
-  buckleJitter: 0.5, // ↓ straight column · ↑ chaotic pile
+  buckleJitter: 0.2, // ↓ straight column · ↑ chaotic pile
 
   // ---- Spin on impact ---- //
   impactSpin: Math.PI, // rotation range on landing · 0 = upright · π = ±90°
@@ -28,13 +28,13 @@ export const config = {
   settleSlack: 2.0, // px drift allowed · ↓ strict · ↑ lenient
 
   // ---- Resting (sleeping) ---- //
-  restingFrames: 8, // frames supported before sleep
+  restingFrames: 12, // frames supported before sleep
   restingSupportDot: 0.2, // ↓ sides count · ↑ only directly under
-  restingWakeVelocity: 1.5, // ↓ wakes easily · ↑ ignores nudges
+  restingWakeVelocity: 1.2, // ↓ wakes easily · ↑ ignores nudges
 
   // ---- Layout ---- //
   chainX: 0.5, // 0 = left · 0.5 = center · 1 = right
-  chainXSpread: 0.18, // random x offset range as fraction of canvas width
+  chainXSpread: 0.12, // random x offset range as fraction of canvas width
   floorY: 0.9, // 0 = top · 1 = bottom
   floorFriction: 0.02, // ↓ slidey · ↑ grippy
 
